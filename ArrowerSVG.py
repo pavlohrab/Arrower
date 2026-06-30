@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#! /usr/bin/env python3
 
 ######################################################################
 #                                                                    #
@@ -168,25 +168,25 @@ def SVG(GenBankFile,ArrowHeight=20,HeadEdge=8,HeadLength=10,marginX=100,marginY=
                 # annotate genes
                 if previousLevel  == 4: previousLevel = 0
                 if previousStop == 0:
-                    ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*F/4.,marginY+50,F)
+                    ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*font/4.,marginY+50,font)
                 else:
-                    if ((start+(stop-start)/2-len(GeneName)*F/4.) - previousStop) < 10:
-                        ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*F/4.,marginY+50+(F+6)*previousLevel,F)
+                    if ((start+(stop-start)/2-len(GeneName)*font/4.) - previousStop) < 10:
+                        ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*font/4.,marginY+50+(font+6)*previousLevel,font)
                         previousLevel += 1
                     else:
                         previousLevel = 0
-                        ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*F/4.,marginY+50+(F+6)*previousLevel,F)
+                        ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*font/4.,marginY+50+(font+6)*previousLevel,font)
                 previousStop = stop
 
 
     ALL_TEXT += '</svg>'
    
-    print ALL_TEXT
+    print(ALL_TEXT)
 
 ARGS = sys.argv
 try:
     if len(ARGS) < 2:
-        print '''
+        print('''
           Correct usage: python arrower_michael.py <GenBank File>\n
           \tAdditional Flags (all in pixels units): 
           \t  -H <ArrowHeight> -E <HeadEdge> -l <HeadLength> -X <marginX> -Y <marginY> -S <scaling> -F <fontSize>\n
@@ -200,8 +200,8 @@ try:
           After running the script, the SVG script will be printed on the screen. To save
           it directly into the file, one can use command: 
           \tpython arrower_michael.py <file> <flags> > output_file.svg
-          File can be then further edited in Adobe Illustrator.         
-          '''
+          File can be then further edited in Adobe Illustrator.
+          ''')
 
     else:
         file = ARGS[1]  # GenBank file
@@ -213,7 +213,7 @@ try:
         S = 100.0       # scaling factor
         F = 14
 
-        for x in xrange(len(ARGS)):
+        for x in range(len(ARGS)):
             if '-' in ARGS[x]:
                 if 'H' in ARGS[x]: H = int(ARGS[x+1])
                 elif 'E' in ARGS[x]: E = int(ARGS[x+1])
@@ -223,12 +223,12 @@ try:
                 elif 'S' in ARGS[x]: S = float(ARGS[x+1])
                 elif 'F' in ARGS[x]: F = int(ARGS[x+1])
                 else:
-                    print 'Check your flags!'
+                    print('Check your flags!')
                     sys.exit(1)
         SVG(file,ArrowHeight=H,HeadEdge=E,HeadLength=l,marginX=X,marginY=Y,scaling=S,font=F)
 
 except:
-    print ''' Incorrect usage. Please, read manual again:
+    print(''' Incorrect usage. Please, read manual again:
           Correct usage: python arrower_michael.py <GenBank File>\n
           \tAdditional Flags (all in pixels units): 
           \t  -H <ArrowHeight> -E <HeadEdge> -l <HeadLength> -X <marginX> -Y <marginY> -S <scaling> -F <fontSize>\n
@@ -242,6 +242,6 @@ except:
           After running the script, the SVG script will be printed on the screen. To save
           it directly into the file, one can use command: 
           \tpython arrower_michael.py <file> <flags> > output_file.svg
-          File can be then further edited in Adobe Illustrator.         
-          ''' 
+          File can be then further edited in Adobe Illustrator.
+          ''')
     sys.exit(1)
