@@ -9,11 +9,25 @@
 ######################################################################
 
 import argparse
+import csv
+from xml.sax.saxutils import escape
 
 from Bio import SeqIO
 
+# Default fill for genes that have no annotation / category.
+DEFAULT_COLOR = "#cccccc"
+
+# Qualitative palette (ColorBrewer "Paired", 12 colours). Categories beyond
+# the palette length wrap around, so very domain-rich clusters may reuse hues.
+PALETTE = [
+    "#a6cee3", "#1f78b4", "#b2df8a", "#33a02c",
+    "#fb9a99", "#e31a1c", "#fdbf6f", "#ff7f00",
+    "#cab2d6", "#6a3d9a", "#ffff99", "#b15928",
+]
+
+
 # --- Draw arrow for gene
-def arrow(X,Y,L,H,strand,h,l,color):
+def arrow(X, Y, L, H, strand, h, l, color, title=""):
     '''
     SVG code for arrow:
         - (X,Y) ... upper left (+) or right (-) corner of the arrow
@@ -22,74 +36,58 @@ def arrow(X,Y,L,H,strand,h,l,color):
         - strand
         - h ... arrow head edge width
         - l ... arrow head length
-        - color
-        - strand
-    the edges are ABCDEFG starting from (X,Y)     
+        - color ... fill colour (hex string, e.g. "#1f78b4")
+        - title ... hover text (gene name / category)
+    the edges are ABCDEFG starting from (X,Y)
     '''
-    
-    if strand == '+':
-        
-        A = [X,Y]
-        B = [X+L-l,Y]
-        C = [X+L-l,Y-h]
-        D = [X+L,Y+H/2]
-        E = [X+L-l,Y+H+h]
-        F = [X+L-l,Y+H]
-        G = [X,Y+H]
 
+    if strand == '+':
+        points = [
+            [X, Y], [X + L - l, Y], [X + L - l, Y - h], [X + L, Y + H / 2],
+            [X + L - l, Y + H + h], [X + L - l, Y + H], [X, Y + H],
+        ]
         if L < l:
             # squize arrow if length shorter than head length
-            B = [X,Y]
-            C = [X,Y-h]
-            D = [X+L,Y+H/2]
-            E = [X,Y+H+h]
-            F = [X,Y+H]
-
-        line = """ <polygon id="bla" points="%i,%i %i,%i %i,%i %i,%i %i,%i %i,%i %i,%i"
-                   style="fill:#cccccc;fill-opacity:1.0;
-                   stroke:#000000;stroke-width:2">
-                   </polygon>""" % (A[0],A[1],B[0],B[1],C[0],C[1],D[0],D[1],E[0],E[1],F[0],F[1],G[0],G[1])
-        
-        return line
+            points = [
+                [X, Y], [X, Y], [X, Y - h], [X + L, Y + H / 2],
+                [X, Y + H + h], [X, Y + H], [X, Y + H],
+            ]
 
     elif strand == '-':
-        
-        A = [X+L,Y]
-        B = [X+l,Y]
-        C = [X+l,Y-h]
-        D = [X,Y+H/2]
-        E = [X+l,Y+H+h]
-        F = [X+l,Y+H]
-        G = [X+L,Y+H]
-
+        points = [
+            [X + L, Y], [X + l, Y], [X + l, Y - h], [X, Y + H / 2],
+            [X + l, Y + H + h], [X + l, Y + H], [X + L, Y + H],
+        ]
         if L < l:
             # squize arrow if length shorter than head length
-            B = [X+L,Y]
-            C = [X+L,Y-h]
-            D = [X,Y+H/2]
-            E = [X+L,Y+H+h]
-            F = [X+L,Y+H]
+            points = [
+                [X + L, Y], [X + L, Y], [X + L, Y - h], [X, Y + H / 2],
+                [X + L, Y + H + h], [X + L, Y + H], [X + L, Y + H],
+            ]
 
-        line = """ <polygon id="bla" points="%i,%i %i,%i %i,%i %i,%i %i,%i %i,%i %i,%i"
-                   style="fill:#cccccc;fill-opacity:1.0;
-                   stroke:#000000;stroke-width:2">
-                   </polygon>""" % (A[0],A[1],B[0],B[1],C[0],C[1],D[0],D[1],E[0],E[1],F[0],F[1],G[0],G[1])
-        
-        return line
-    
-    else: return 0
+    else:
+        return ""
 
-def line(X,Y,L):
+    points_str = " ".join("%i,%i" % (p[0], p[1]) for p in points)
+    title_tag = "<title>%s</title>" % escape(title) if title else ""
+
+    return """ <polygon points="%s"
+                   style="fill:%s;fill-opacity:1.0;
+                   stroke:#000000;stroke-width:2">%s</polygon>""" % (
+        points_str, color, title_tag)
+
+
+def line(X, Y, L):
     '''
     Draw a line below genes
     '''
-    
+
     line = """<line x1="%i" y1="%i" x2="%i" y2="%i"
-              style="stroke:rgb(99,99,99);stroke-width:2"/>""" % (X,Y,X+L,Y)
+              style="stroke:rgb(99,99,99);stroke-width:2"/>""" % (X, Y, X + L, Y)
     return line
 
 
-def text(text,X,Y,F):
+def text(text, X, Y, F):
     '''
     Write gene name
     '''
@@ -98,58 +96,143 @@ def text(text,X,Y,F):
                  font-size  : %i;
                  font-style : italic;
                 "
-          >%s</text>""" % (X,Y,F,text)
+          >%s</text>""" % (X, Y, F, escape(text))
     return line
-    
+
+
+def legend(color_map, X, Y, font):
+    '''
+    Render a legend (colour swatch + category label) for the colour map.
+    Returns the SVG fragment and the total height it occupies (in px).
+    '''
+    box = font
+    gap = 6
+    row_h = box + gap
+
+    parts = []
+    for i, category in enumerate(sorted(color_map)):
+        color = color_map[category]
+        y = Y + i * row_h
+        parts.append(
+            """<rect x="%i" y="%i" width="%i" height="%i"
+               style="fill:%s;stroke:#000000;stroke-width:1"/>""" % (
+                X, y, box, box, color))
+        parts.append(
+            """<text x="%i" y="%i"
+               style="font-family: Arial; font-size: %i;"
+               >%s</text>""" % (X + box + gap, y + box - 2, font, escape(category)))
+
+    return "\n".join(parts), len(color_map) * row_h
+
 
 def RGBToHTMLColor(rgb_tuple):
     '''
     Convert RGB color to HTML color format
     '''
     hexcolor = '#%02x%02x%02x' % rgb_tuple
-    
+
     return hexcolor.strip('-')
 
 
-def SVG(GenBankFile,ArrowHeight=20,HeadEdge=8,HeadLength=10,marginX=100,marginY=30,scaling=100.0,font=14):
+def gene_name(feature):
+    '''
+    Resolve a display name for a CDS feature, tolerating files that lack the
+    'gene' qualifier by falling back to locus_tag / protein_id.
+    '''
+    for key in ('gene', 'locus_tag', 'protein_id'):
+        if key in feature.qualifiers:
+            return feature.qualifiers[key][0]
+    return 'unknown'
+
+
+def load_annotations(path):
+    '''
+    Load a gene -> category mapping from a TSV/CSV file.
+
+    Format: two columns, "gene_id <delimiter> category". The delimiter
+    (tab, comma or semicolon) is auto-detected. Blank lines and lines
+    starting with '#' (e.g. a header) are ignored.
+    '''
+    mapping = {}
+    with open(path, newline='') as fh:
+        sample = fh.read(2048)
+        fh.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters="\t,;")
+        except csv.Error:
+            dialect = csv.excel_tab
+        for row in csv.reader(fh, dialect):
+            if not row or row[0].lstrip().startswith('#'):
+                continue
+            if len(row) < 2:
+                continue
+            gene, category = row[0].strip(), row[1].strip()
+            if gene and category:
+                mapping[gene] = category
+    return mapping
+
+
+def build_color_map(categories):
+    '''
+    Assign a palette colour to each category. Order is preserved so that the
+    same input always yields the same colours.
+    '''
+    color_map = {}
+    for category in categories:
+        if category not in color_map:
+            color_map[category] = PALETTE[len(color_map) % len(PALETTE)]
+    return color_map
+
+
+def SVG(GenBankFile, annotations=None, ArrowHeight=20, HeadEdge=8, HeadLength=10,
+        marginX=100, marginY=30, scaling=100.0, font=14):
     '''
     Create the main SVG document:
-        - read in GenBank documnet
+        - read in GenBank document
         - find genes, start and stop positions, and strands
-        - write the SVG files
+        - colour arrows by category (from the annotation mapping)
+        - draw a legend and return the SVG as a string
     '''
-    
-    # --- create SVG header
-    ALL_TEXT = ""
-
-    header = """<?xml version="1.0" standalone="no"?>
-    <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" 
-    "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-
-    <svg width="870" height="300" xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'
-    onload='Init(evt)'>
-    """ #% Width
-
-    ALL_TEXT += header
+    annotations = annotations or {}
 
     # --- read in GenBank file
     with open(GenBankFile, 'r') as handle:
         seq_records = list(SeqIO.parse(handle, "genbank"))
 
+    # --- collect the categories actually present, in genomic order, and map
+    #     them to colours
+    ordered_categories = []
     for seq_record in seq_records:
-        
-        # draw a line that corespond to cluster size
+        for feature in seq_record.features:
+            if feature.type == 'CDS':
+                category = annotations.get(gene_name(feature))
+                if category and category not in ordered_categories:
+                    ordered_categories.append(category)
+    color_map = build_color_map(ordered_categories)
+
+    # --- build the body, tracking the extent so the canvas can be sized
+    body = ""
+    max_right = marginX
+    content_bottom = marginY + ArrowHeight
+
+    for seq_record in seq_records:
+
+        # draw a line that corresponds to cluster size
         ClusterSize = len(seq_record.seq)
-        ALL_TEXT += line(marginX,marginY+ArrowHeight/2,ClusterSize / scaling)
-        
-        previousStop = 0 # keep track of previous stop to adjust text location
+        cluster_px = ClusterSize / scaling
+        max_right = max(max_right, marginX + cluster_px)
+        body += line(marginX, marginY + ArrowHeight / 2, cluster_px)
+
+        previousStop = 0  # keep track of previous stop to adjust text location
         previousLevel = 1
         for feature in seq_record.features:
             if feature.type == 'CDS':
-                
-                GeneName = feature.qualifiers['gene'][0]
 
-                strand = feature.strand
+                GeneName = gene_name(feature)
+                category = annotations.get(GeneName)
+                color = color_map.get(category, DEFAULT_COLOR)
+
+                strand = feature.location.strand
                 if strand == -1:
                     strand = '-'
                 elif strand == 1:
@@ -157,34 +240,56 @@ def SVG(GenBankFile,ArrowHeight=20,HeadEdge=8,HeadLength=10,marginX=100,marginY=
 
                 start = str(feature.location.start)
                 if '>' in start or '<' in start:
-                    start = start.replace('>','').replace('<','')
+                    start = start.replace('>', '').replace('<', '')
                 start = int(start) / scaling
-                
-                stop = str(feature.location.end) 
+
+                stop = str(feature.location.end)
                 if '>' in stop or '<' in stop:
-                    stop = stop.replace('>','').replace('<','')
+                    stop = stop.replace('>', '').replace('<', '')
                 stop = int(stop) / scaling
-                
+
                 # write arrow to SVG file
-                ALL_TEXT += arrow(start+marginX,marginY,stop-start,ArrowHeight,strand,HeadEdge,HeadLength,GeneName)
+                title = GeneName if category is None else "%s (%s)" % (GeneName, category)
+                body += arrow(start + marginX, marginY, stop - start, ArrowHeight,
+                              strand, HeadEdge, HeadLength, color, title=title)
 
                 # annotate genes
-                if previousLevel  == 4: previousLevel = 0
+                if previousLevel == 4:
+                    previousLevel = 0
                 if previousStop == 0:
-                    ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*font/4.,marginY+50,font)
+                    text_y = marginY + 50
                 else:
-                    if ((start+(stop-start)/2-len(GeneName)*font/4.) - previousStop) < 10:
-                        ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*font/4.,marginY+50+(font+6)*previousLevel,font)
+                    if ((start + (stop - start) / 2 - len(GeneName) * font / 4.) - previousStop) < 10:
+                        text_y = marginY + 50 + (font + 6) * previousLevel
                         previousLevel += 1
                     else:
                         previousLevel = 0
-                        ALL_TEXT += text(GeneName,marginX+start+(stop-start)/2-len(GeneName)*font/4.,marginY+50+(font+6)*previousLevel,font)
+                        text_y = marginY + 50 + (font + 6) * previousLevel
+                text_x = marginX + start + (stop - start) / 2 - len(GeneName) * font / 4.
+                body += text(GeneName, text_x, text_y, font)
+                content_bottom = max(content_bottom, text_y)
                 previousStop = stop
 
+    # --- legend (only when there is something to show)
+    if color_map:
+        legend_y = content_bottom + 2 * font
+        legend_svg, legend_h = legend(color_map, marginX, legend_y, font)
+        body += "\n" + legend_svg
+        content_bottom = legend_y + legend_h
 
-    ALL_TEXT += '</svg>'
+    # --- size the canvas to the content
+    width = int(max_right + marginX)
+    height = int(content_bottom + marginY)
 
-    return ALL_TEXT
+    header = """<?xml version="1.0" standalone="no"?>
+    <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+    "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+
+    <svg width="%i" height="%i" xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'>
+    """ % (width, height)
+
+    return header + body + '\n</svg>'
+
 
 def parse_args(argv=None):
     '''
@@ -206,6 +311,13 @@ def parse_args(argv=None):
         metavar="SVG_FILE",
         default=None,
         help="write the SVG to this file (default: print to stdout)",
+    )
+    parser.add_argument(
+        "-a", "--annotations",
+        metavar="TSV_FILE",
+        default=None,
+        help="TSV/CSV file mapping gene id -> category (e.g. Pfam domain); "
+             "arrows are coloured by category and a legend is drawn",
     )
     parser.add_argument(
         "-H", "--arrow-height",
@@ -249,8 +361,11 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
 
+    annotations = load_annotations(args.annotations) if args.annotations else {}
+
     svg = SVG(
         args.genbank,
+        annotations=annotations,
         ArrowHeight=args.arrow_height,
         HeadEdge=args.head_edge,
         HeadLength=args.head_length,
