@@ -8,8 +8,9 @@
 #                                                                    #
 ######################################################################
 
+import argparse
+
 from Bio import SeqIO
-import sys
 
 # --- Draw arrow for gene
 def arrow(X,Y,L,H,strand,h,l,color):
@@ -132,8 +133,10 @@ def SVG(GenBankFile,ArrowHeight=20,HeadEdge=8,HeadLength=10,marginX=100,marginY=
     ALL_TEXT += header
 
     # --- read in GenBank file
-    file = open(GenBankFile,'r')
-    for seq_record in SeqIO.parse(file, "genbank"):
+    with open(GenBankFile, 'r') as handle:
+        seq_records = list(SeqIO.parse(handle, "genbank"))
+
+    for seq_record in seq_records:
         
         # draw a line that corespond to cluster size
         ClusterSize = len(seq_record.seq)
@@ -180,68 +183,89 @@ def SVG(GenBankFile,ArrowHeight=20,HeadEdge=8,HeadLength=10,marginX=100,marginY=
 
 
     ALL_TEXT += '</svg>'
-   
-    print(ALL_TEXT)
 
-ARGS = sys.argv
-try:
-    if len(ARGS) < 2:
-        print('''
-          Correct usage: python arrower_michael.py <GenBank File>\n
-          \tAdditional Flags (all in pixels units): 
-          \t  -H <ArrowHeight> -E <HeadEdge> -l <HeadLength> -X <marginX> -Y <marginY> -S <scaling> -F <fontSize>\n
-          \t ArrowHeight ... the width of the arrow central part
-          \t HeadEdge    ... additional width of the head
-          \t HeadLength  ... head length
-          \t marginX     ... left-site margins
-          \t marginY     ... top-site margins
-          \t scaling     ... scaling of px per bp (100 means 100bp/px)
-          \t fontSize    ... gene annotation font size\n
-          After running the script, the SVG script will be printed on the screen. To save
-          it directly into the file, one can use command: 
-          \tpython arrower_michael.py <file> <flags> > output_file.svg
-          File can be then further edited in Adobe Illustrator.
-          ''')
+    return ALL_TEXT
 
+def parse_args(argv=None):
+    '''
+    Parse command line arguments.
+    '''
+    parser = argparse.ArgumentParser(
+        description="Plot arrows for a gene cluster given a GenBank file, "
+                    "producing an SVG that can be further edited in e.g. Adobe Illustrator.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "genbank",
+        metavar="GENBANK_FILE",
+        help="input GenBank file describing the gene cluster",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        metavar="SVG_FILE",
+        default=None,
+        help="write the SVG to this file (default: print to stdout)",
+    )
+    parser.add_argument(
+        "-H", "--arrow-height",
+        type=int, default=20,
+        help="width of the arrow central part, in pixels",
+    )
+    parser.add_argument(
+        "-E", "--head-edge",
+        type=int, default=8,
+        help="additional width of the arrow head, in pixels",
+    )
+    parser.add_argument(
+        "-l", "--head-length",
+        type=int, default=10,
+        help="arrow head length, in pixels",
+    )
+    parser.add_argument(
+        "-X", "--margin-x",
+        type=int, default=100,
+        help="left-side margin, in pixels",
+    )
+    parser.add_argument(
+        "-Y", "--margin-y",
+        type=int, default=30,
+        help="top-side margin, in pixels",
+    )
+    parser.add_argument(
+        "-S", "--scaling",
+        type=float, default=100.0,
+        help="scaling of bp per px (100 means 100 bp/px)",
+    )
+    parser.add_argument(
+        "-F", "--font-size",
+        type=int, default=14,
+        help="gene annotation font size",
+    )
+
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+
+    svg = SVG(
+        args.genbank,
+        ArrowHeight=args.arrow_height,
+        HeadEdge=args.head_edge,
+        HeadLength=args.head_length,
+        marginX=args.margin_x,
+        marginY=args.margin_y,
+        scaling=args.scaling,
+        font=args.font_size,
+    )
+
+    if args.output:
+        with open(args.output, 'w') as out:
+            out.write(svg)
     else:
-        file = ARGS[1]  # GenBank file
-        H = 20          # arrow width
-        E = 8           # arrow head edge size
-        l = 10          # arrow head edge length
-        X = 100         # left-site margins
-        Y = 30          # top-site margins
-        S = 100.0       # scaling factor
-        F = 14
+        print(svg)
 
-        for x in range(len(ARGS)):
-            if '-' in ARGS[x]:
-                if 'H' in ARGS[x]: H = int(ARGS[x+1])
-                elif 'E' in ARGS[x]: E = int(ARGS[x+1])
-                elif 'l' in ARGS[x]: l = int(ARGS[x+1])
-                elif 'X' in ARGS[x]: X = int(ARGS[x+1])
-                elif 'Y' in ARGS[x]: Y = int(ARGS[x+1])
-                elif 'S' in ARGS[x]: S = float(ARGS[x+1])
-                elif 'F' in ARGS[x]: F = int(ARGS[x+1])
-                else:
-                    print('Check your flags!')
-                    sys.exit(1)
-        SVG(file,ArrowHeight=H,HeadEdge=E,HeadLength=l,marginX=X,marginY=Y,scaling=S,font=F)
 
-except:
-    print(''' Incorrect usage. Please, read manual again:
-          Correct usage: python arrower_michael.py <GenBank File>\n
-          \tAdditional Flags (all in pixels units): 
-          \t  -H <ArrowHeight> -E <HeadEdge> -l <HeadLength> -X <marginX> -Y <marginY> -S <scaling> -F <fontSize>\n
-          \t ArrowHeight ... the width of the arrow central part
-          \t HeadEdge    ... additional width of the head
-          \t HeadLength  ... head length
-          \t marginX     ... left-site margins
-          \t marginY     ... top-site margins
-          \t scaling     ... scaling of px per bp (100 means 100bp/px)
-          \t fontSize    ... gene annotation font size\n
-          After running the script, the SVG script will be printed on the screen. To save
-          it directly into the file, one can use command: 
-          \tpython arrower_michael.py <file> <flags> > output_file.svg
-          File can be then further edited in Adobe Illustrator.
-          ''')
-    sys.exit(1)
+if __name__ == '__main__':
+    main()
