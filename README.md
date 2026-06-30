@@ -26,33 +26,57 @@ The output SVG can then be edited in e.g. Adobe Illustrator.
 
 ## Coloring by category (e.g. Pfam domains)
 
-Pass a `-a` annotation file mapping each gene to a category. Arrows are colored
-per category and a legend is drawn automatically; each arrow also shows
-`gene (category)` on hover.
+Coloring is optional. With **no** `-a` file, all arrows are grey and no legend is
+drawn. Pass a `-a` annotation file to color arrows per category and draw a legend
+automatically; each arrow also shows `gene (category)` on hover.
 
 ```
 python ArrowerSVG.py cluster.gbk -a annotations.tsv -o output.svg
 ```
 
-The annotation file is a two-column TSV/CSV (delimiter auto-detected). Blank
-lines and lines starting with `#` are ignored:
+The annotation file is a TSV/CSV (delimiter auto-detected) with **2 or 3 columns**:
+`gene_id, category[, color]`. Blank lines and lines starting with `#` are ignored.
 
 ```
-geneA	Kinase
+geneA	Kinase	    #e31a1c
 geneB	Transporter
-geneC	Kinase
+geneC	Kinase	    #e31a1c
 geneD	Hydrolase
 ```
 
-Genes absent from the file are drawn grey. With no `-a` file, all arrows are grey
-and no legend is drawn. The canvas size adapts to the cluster length and legend.
+- **Column 1** (`gene_id`) is matched against the GenBank qualifier chosen by
+  `--id-source` (see below).
+- **Column 2** (`category`) groups genes; equal categories share a color.
+- **Column 3** (`color`, optional) sets an explicit color for that category —
+  a hex value like `#e31a1c` or an SVG color name like `red`. Categories without
+  an explicit color get one from the built-in palette. (The first color seen for
+  a category wins.)
+
+Genes absent from the file are drawn grey. The canvas size adapts to the cluster
+length and legend.
+
+### Choosing the gene identifier
+
+`--id-source` controls which GenBank CDS qualifier identifies a gene — this is
+both the arrow label and the key matched against column 1 of the annotation file:
+
+- `auto` (default) — tries `gene`, then `locus_tag`, then `protein_id`.
+- `gene`, `locus_tag`, `protein_id` — force that specific qualifier.
+
+`locus_tag` is often the most reliable choice, since it is usually present and
+unique for every CDS:
+
+```
+python ArrowerSVG.py cluster.gbk -a annotations.tsv --id-source locus_tag
+```
 
 ## Options
 
 | Flag | Long form         | Default | Description                                      |
 |------|-------------------|---------|--------------------------------------------------|
 | `-o` | `--output`        | stdout  | Write the SVG to this file                       |
-| `-a` | `--annotations`   | none    | TSV/CSV mapping gene id → category (for coloring) |
+| `-a` | `--annotations`   | none    | TSV/CSV: `gene_id, category[, color]` (enables coloring) |
+|      | `--id-source`     | auto    | GenBank qualifier to identify genes: `auto`/`gene`/`locus_tag`/`protein_id` |
 | `-H` | `--arrow-height`  | 20      | Width of the arrow central part (px)             |
 | `-E` | `--head-edge`     | 8       | Additional width of the arrow head (px)          |
 | `-l` | `--head-length`   | 10      | Arrow head length (px)                           |

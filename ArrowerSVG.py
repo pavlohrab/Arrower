@@ -134,12 +134,20 @@ def RGBToHTMLColor(rgb_tuple):
     return hexcolor.strip('-')
 
 
-def gene_name(feature):
+# Qualifiers that 'auto' tries, in order, to identify a CDS feature.
+ID_SOURCES = ('auto', 'gene', 'locus_tag', 'protein_id')
+
+
+def feature_identifier(feature, id_source='auto'):
     '''
-    Resolve a display name for a CDS feature, tolerating files that lack the
-    'gene' qualifier by falling back to locus_tag / protein_id.
+    Resolve the identifier of a CDS feature. This is both the label drawn under
+    the arrow and the key matched against the annotation file.
+
+    id_source selects which GenBank qualifier to use; 'auto' tries 'gene',
+    then 'locus_tag', then 'protein_id'. Returns 'unknown' if none is present.
     '''
-    for key in ('gene', 'locus_tag', 'protein_id'):
+    keys = ('gene', 'locus_tag', 'protein_id') if id_source == 'auto' else (id_source,)
+    for key in keys:
         if key in feature.qualifiers:
             return feature.qualifiers[key][0]
     return 'unknown'
@@ -147,13 +155,19 @@ def gene_name(feature):
 
 def load_annotations(path):
     '''
-    Load a gene -> category mapping from a TSV/CSV file.
+    Load a gene -> category mapping (and optional category -> colour map) from
+    a TSV/CSV file.
 
-    Format: two columns, "gene_id <delimiter> category". The delimiter
-    (tab, comma or semicolon) is auto-detected. Blank lines and lines
-    starting with '#' (e.g. a header) are ignored.
+    Format: 2 or 3 columns, "gene_id <delimiter> category [<delimiter> colour]".
+    The delimiter (tab, comma or semicolon) is auto-detected. The optional 3rd
+    column sets an explicit colour for that category (hex like "#ff0000" or an
+    SVG colour name like "red"); the first colour seen for a category wins.
+    Blank lines and lines starting with '#' (e.g. a header) are ignored.
+
+    Returns (mapping, category_colors).
     '''
     mapping = {}
+    category_colors = {}
     with open(path, newline='') as fh:
         sample = fh.read(2048)
         fh.seek(0)
@@ -167,30 +181,44 @@ def load_annotations(path):
             if len(row) < 2:
                 continue
             gene, category = row[0].strip(), row[1].strip()
-            if gene and category:
-                mapping[gene] = category
-    return mapping
+            if not (gene and category):
+                continue
+            mapping[gene] = category
+            color = row[2].strip() if len(row) >= 3 else ''
+            if color and category not in category_colors:
+                category_colors[category] = color
+    return mapping, category_colors
 
 
-def build_color_map(categories):
+def build_color_map(categories, overrides=None):
     '''
-    Assign a palette colour to each category. Order is preserved so that the
-    same input always yields the same colours.
+    Assign a colour to each category. Categories listed in `overrides` keep
+    their explicit colour; the rest take the next palette colour. Order is
+    preserved so that the same input always yields the same colours.
     '''
+    overrides = overrides or {}
     color_map = {}
+    palette_i = 0
     for category in categories:
-        if category not in color_map:
-            color_map[category] = PALETTE[len(color_map) % len(PALETTE)]
+        if category in color_map:
+            continue
+        if category in overrides:
+            color_map[category] = overrides[category]
+        else:
+            color_map[category] = PALETTE[palette_i % len(PALETTE)]
+            palette_i += 1
     return color_map
 
 
-def SVG(GenBankFile, annotations=None, ArrowHeight=20, HeadEdge=8, HeadLength=10,
+def SVG(GenBankFile, annotations=None, category_colors=None, id_source='auto',
+        ArrowHeight=20, HeadEdge=8, HeadLength=10,
         marginX=100, marginY=30, scaling=100.0, font=14):
     '''
     Create the main SVG document:
         - read in GenBank document
         - find genes, start and stop positions, and strands
-        - colour arrows by category (from the annotation mapping)
+        - colour arrows by category (from the annotation mapping); when no
+          annotations are given every arrow is grey and no legend is drawn
         - draw a legend and return the SVG as a string
     '''
     annotations = annotations or {}
@@ -205,10 +233,10 @@ def SVG(GenBankFile, annotations=None, ArrowHeight=20, HeadEdge=8, HeadLength=10
     for seq_record in seq_records:
         for feature in seq_record.features:
             if feature.type == 'CDS':
-                category = annotations.get(gene_name(feature))
+                category = annotations.get(feature_identifier(feature, id_source))
                 if category and category not in ordered_categories:
                     ordered_categories.append(category)
-    color_map = build_color_map(ordered_categories)
+    color_map = build_color_map(ordered_categories, category_colors)
 
     # --- build the body, tracking the extent so the canvas can be sized
     body = ""
@@ -228,7 +256,7 @@ def SVG(GenBankFile, annotations=None, ArrowHeight=20, HeadEdge=8, HeadLength=10
         for feature in seq_record.features:
             if feature.type == 'CDS':
 
-                GeneName = gene_name(feature)
+                GeneName = feature_identifier(feature, id_source)
                 category = annotations.get(GeneName)
                 color = color_map.get(category, DEFAULT_COLOR)
 
@@ -316,8 +344,20 @@ def parse_args(argv=None):
         "-a", "--annotations",
         metavar="TSV_FILE",
         default=None,
-        help="TSV/CSV file mapping gene id -> category (e.g. Pfam domain); "
-             "arrows are coloured by category and a legend is drawn",
+        help="optional TSV/CSV file with columns 'gene_id, category[, colour]'. "
+             "Arrows are coloured by category and a legend is drawn. The optional "
+             "3rd column sets an explicit colour for that category (e.g. '#ff0000' "
+             "or 'red'), otherwise a palette colour is used. gene_id is matched "
+             "against the qualifier chosen by --id-source. Without this option all "
+             "arrows are grey and no legend is drawn.",
+    )
+    parser.add_argument(
+        "--id-source",
+        choices=ID_SOURCES,
+        default="auto",
+        help="which GenBank CDS qualifier identifies a gene, used both as the "
+             "arrow label and to match the annotation file. 'auto' tries 'gene', "
+             "then 'locus_tag', then 'protein_id'",
     )
     parser.add_argument(
         "-H", "--arrow-height",
@@ -361,11 +401,16 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
 
-    annotations = load_annotations(args.annotations) if args.annotations else {}
+    if args.annotations:
+        annotations, category_colors = load_annotations(args.annotations)
+    else:
+        annotations, category_colors = {}, {}
 
     svg = SVG(
         args.genbank,
         annotations=annotations,
+        category_colors=category_colors,
+        id_source=args.id_source,
         ArrowHeight=args.arrow_height,
         HeadEdge=args.head_edge,
         HeadLength=args.head_length,
